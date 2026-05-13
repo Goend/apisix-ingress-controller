@@ -17,7 +17,7 @@
 
 ARG BASE_IMAGE_TAG=nonroot
 
-FROM gcr.io/distroless/cc-debian12:${BASE_IMAGE_TAG}
+FROM gcr.m.daocloud.io/distroless/cc-debian12:${BASE_IMAGE_TAG}
 
 ARG TARGETARCH
 

@@ -27,6 +27,7 @@ import (
 	"time"
 
 	"gopkg.in/yaml.v3"
+	"k8s.io/apimachinery/pkg/labels"
 
 	"github.com/apache/apisix-ingress-controller/internal/types"
 )
@@ -121,6 +122,11 @@ func NewConfigFromFile(filename string) (*Config, error) {
 func (c *Config) Validate() error {
 	if c.ControllerName == "" {
 		return fmt.Errorf("controller_name is required")
+	}
+	if c.IngressStatusPodLabelSelector != "" {
+		if _, err := labels.Parse(c.IngressStatusPodLabelSelector); err != nil {
+			return fmt.Errorf("invalid ingress_status_pod_label_selector: %w", err)
+		}
 	}
 	if err := validateProvider(c.ProviderConfig); err != nil {
 		return err

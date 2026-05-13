@@ -145,6 +145,12 @@ func newAPISIXIngressController() *cobra.Command {
 		config.DefaultControllerName,
 		"The name of the controller",
 	)
+	cmd.Flags().StringVar(
+		&cfg.IngressStatusPodLabelSelector,
+		"ingress-status-pod-label-selector",
+		"",
+		"Label selector used as the last fallback to discover ready pods and publish their node addresses into Ingress status.",
+	)
 
 	return cmd
 }

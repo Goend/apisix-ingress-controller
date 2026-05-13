@@ -20,13 +20,16 @@ package controller
 import (
 	"context"
 	"fmt"
+	"net"
 	"reflect"
+	"sort"
 
 	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
 	discoveryv1 "k8s.io/api/discovery/v1"
 	networkingv1 "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/utils/ptr"
@@ -43,6 +46,7 @@ import (
 	"github.com/apache/apisix-ingress-controller/api/v1alpha1"
 	apiv2 "github.com/apache/apisix-ingress-controller/api/v2"
 	"github.com/apache/apisix-ingress-controller/internal/adc/translator/annotations"
+	"github.com/apache/apisix-ingress-controller/internal/controller/config"
 	"github.com/apache/apisix-ingress-controller/internal/controller/indexer"
 	"github.com/apache/apisix-ingress-controller/internal/controller/status"
 	"github.com/apache/apisix-ingress-controller/internal/manager/readiness"
@@ -62,13 +66,23 @@ type IngressReconciler struct { //nolint:revive
 
 	Updater status.Updater
 	Readier readiness.ReadinessManager
+
+	statusPodSelector labels.Selector
 }
 
 // SetupWithManager sets up the controller with the Manager.
 func (r *IngressReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	r.genericEvent = make(chan event.GenericEvent, 100)
 
-	return ctrl.NewControllerManagedBy(mgr).
+	if selector := config.ControllerConfig.IngressStatusPodLabelSelector; selector != "" {
+		parsedSelector, err := labels.Parse(selector)
+		if err != nil {
+			return fmt.Errorf("parse ingress status pod label selector: %w", err)
+		}
+		r.statusPodSelector = parsedSelector
+	}
+
+	builderInstance := ctrl.NewControllerManagedBy(mgr).
 		For(&networkingv1.Ingress{},
 			builder.WithPredicates(
 				MatchesIngressClassPredicate(r.Client, r.Log),
@@ -79,6 +93,8 @@ func (r *IngressReconciler) SetupWithManager(mgr ctrl.Manager) error {
 				predicate.GenerationChangedPredicate{},
 				predicate.AnnotationChangedPredicate{},
 				predicate.NewPredicateFuncs(TypePredicate[*corev1.Secret]()),
+				r.statusPodPredicate(),
+				r.statusNodePassPredicate(),
 			),
 		).
 		Watches(
@@ -117,8 +133,23 @@ func (r *IngressReconciler) SetupWithManager(mgr ctrl.Manager) error {
 				r.genericEvent,
 				handler.EnqueueRequestsFromMapFunc(r.listIngressForGenericEvent),
 			),
-		).
-		Complete(r)
+		)
+
+	if r.statusPodSelector != nil {
+		builderInstance = builderInstance.
+			Watches(
+				&corev1.Pod{},
+				handler.EnqueueRequestsFromMapFunc(r.listManagedIngressesForStatusResource),
+				builder.WithPredicates(r.statusPodPredicate()),
+			).
+			Watches(
+				&corev1.Node{},
+				handler.EnqueueRequestsFromMapFunc(r.listManagedIngressesForStatusResource),
+				builder.WithPredicates(r.statusNodePredicate()),
+			)
+	}
+
+	return builderInstance.Complete(r)
 }
 
 // Reconcile handles the reconciliation of Ingress resources
@@ -735,6 +766,14 @@ func (r *IngressReconciler) updateStatus(ctx context.Context, tctx *provider.Tra
 		}
 	}
 
+	if len(loadBalancerStatus.Ingress) == 0 {
+		addrs, err := r.statusAddressesFromPods(ctx)
+		if err != nil {
+			return err
+		}
+		loadBalancerStatus.Ingress = addrs
+	}
+
 	// update the load balancer status
 	if len(loadBalancerStatus.Ingress) > 0 && !reflect.DeepEqual(ingress.Status.LoadBalancer, loadBalancerStatus) {
 		ingress.Status.LoadBalancer = loadBalancerStatus
@@ -751,6 +790,180 @@ func (r *IngressReconciler) updateStatus(ctx context.Context, tctx *provider.Tra
 	}
 
 	return nil
+}
+
+func (r *IngressReconciler) statusAddressesFromPods(ctx context.Context) ([]networkingv1.IngressLoadBalancerIngress, error) {
+	if r.statusPodSelector == nil {
+		return nil, nil
+	}
+
+	var podList corev1.PodList
+	if err := r.List(ctx, &podList, client.MatchingLabelsSelector{Selector: r.statusPodSelector}); err != nil {
+		return nil, fmt.Errorf("list pods for ingress status: %w", err)
+	}
+
+	nodeNames := make(map[string]struct{})
+	for i := range podList.Items {
+		pod := &podList.Items[i]
+		if !isReadyStatusPod(pod) || pod.Spec.NodeName == "" {
+			continue
+		}
+		nodeNames[pod.Spec.NodeName] = struct{}{}
+	}
+
+	addresses := make([]string, 0, len(nodeNames))
+	seen := make(map[string]struct{}, len(nodeNames))
+	for nodeName := range nodeNames {
+		var node corev1.Node
+		if err := r.Get(ctx, client.ObjectKey{Name: nodeName}, &node); err != nil {
+			return nil, fmt.Errorf("get node %s for ingress status: %w", nodeName, err)
+		}
+
+		address, ok := nodeAddressForIngressStatus(&node)
+		if !ok {
+			continue
+		}
+		if _, exists := seen[address]; exists {
+			continue
+		}
+		seen[address] = struct{}{}
+		addresses = append(addresses, address)
+	}
+
+	sort.Strings(addresses)
+
+	result := make([]networkingv1.IngressLoadBalancerIngress, 0, len(addresses))
+	for _, address := range addresses {
+		result = append(result, nameOrIPToIngressLoadBalancerIngress(address))
+	}
+	return result, nil
+}
+
+func isReadyStatusPod(pod *corev1.Pod) bool {
+	if pod.Status.Phase != corev1.PodRunning {
+		return false
+	}
+	for _, cond := range pod.Status.Conditions {
+		if cond.Type == corev1.PodReady && cond.Status == corev1.ConditionTrue {
+			return true
+		}
+	}
+	return false
+}
+
+func nodeAddressForIngressStatus(node *corev1.Node) (string, bool) {
+	for _, addressType := range []corev1.NodeAddressType{corev1.NodeExternalIP, corev1.NodeInternalIP, corev1.NodeHostName} {
+		for _, address := range node.Status.Addresses {
+			if address.Type == addressType && address.Address != "" {
+				return address.Address, true
+			}
+		}
+	}
+	return "", false
+}
+
+func nameOrIPToIngressLoadBalancerIngress(value string) networkingv1.IngressLoadBalancerIngress {
+	if net.ParseIP(value) != nil {
+		return networkingv1.IngressLoadBalancerIngress{IP: value}
+	}
+	return networkingv1.IngressLoadBalancerIngress{Hostname: value}
+}
+
+func (r *IngressReconciler) listManagedIngressesForStatusResource(ctx context.Context, _ client.Object) []reconcile.Request {
+	var ingressList networkingv1.IngressList
+	if err := r.List(ctx, &ingressList); err != nil {
+		r.Log.Error(err, "failed to list ingresses for status resource")
+		return nil
+	}
+
+	requests := make([]reconcile.Request, 0, len(ingressList.Items))
+	for i := range ingressList.Items {
+		ingress := &ingressList.Items[i]
+		if !MatchesIngressClass(r.Client, r.Log, ingress) {
+			continue
+		}
+		requests = append(requests, reconcile.Request{
+			NamespacedName: utils.NamespacedName(ingress),
+		})
+	}
+	return requests
+}
+
+func (r *IngressReconciler) statusPodPredicate() predicate.Funcs {
+	return predicate.Funcs{
+		CreateFunc: func(e event.CreateEvent) bool {
+			return r.matchesStatusPod(e.Object)
+		},
+		UpdateFunc: func(e event.UpdateEvent) bool {
+			return r.matchesStatusPod(e.ObjectOld) || r.matchesStatusPod(e.ObjectNew)
+		},
+		DeleteFunc: func(e event.DeleteEvent) bool {
+			return r.matchesStatusPod(e.Object)
+		},
+		GenericFunc: func(e event.GenericEvent) bool {
+			return r.matchesStatusPod(e.Object)
+		},
+	}
+}
+
+func (r *IngressReconciler) statusNodePredicate() predicate.Funcs {
+	return predicate.Funcs{
+		CreateFunc: func(e event.CreateEvent) bool {
+			_, ok := e.Object.(*corev1.Node)
+			return ok
+		},
+		UpdateFunc: func(e event.UpdateEvent) bool {
+			oldNode, okOld := e.ObjectOld.(*corev1.Node)
+			newNode, okNew := e.ObjectNew.(*corev1.Node)
+			if !okOld || !okNew {
+				return false
+			}
+			return !reflect.DeepEqual(oldNode.Status.Addresses, newNode.Status.Addresses)
+		},
+		DeleteFunc: func(e event.DeleteEvent) bool {
+			_, ok := e.Object.(*corev1.Node)
+			return ok
+		},
+		GenericFunc: func(e event.GenericEvent) bool {
+			_, ok := e.Object.(*corev1.Node)
+			return ok
+		},
+	}
+}
+
+func (r *IngressReconciler) statusNodePassPredicate() predicate.Funcs {
+	return predicate.Funcs{
+		CreateFunc: func(e event.CreateEvent) bool {
+			_, ok := e.Object.(*corev1.Node)
+			return ok
+		},
+		UpdateFunc: func(e event.UpdateEvent) bool {
+			_, okOld := e.ObjectOld.(*corev1.Node)
+			_, okNew := e.ObjectNew.(*corev1.Node)
+			return okOld && okNew
+		},
+		DeleteFunc: func(e event.DeleteEvent) bool {
+			_, ok := e.Object.(*corev1.Node)
+			return ok
+		},
+		GenericFunc: func(e event.GenericEvent) bool {
+			_, ok := e.Object.(*corev1.Node)
+			return ok
+		},
+	}
+}
+
+func (r *IngressReconciler) matchesStatusPod(obj client.Object) bool {
+	if r.statusPodSelector == nil || obj == nil {
+		return false
+	}
+
+	pod, ok := obj.(*corev1.Pod)
+	if !ok {
+		return false
+	}
+
+	return r.statusPodSelector.Matches(labels.Set(pod.Labels))
 }
 
 // listIngressesForGatewayProxy list all ingresses that use a specific gateway proxy
