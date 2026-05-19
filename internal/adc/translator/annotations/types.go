@@ -78,6 +78,9 @@ const (
 	// auth-redirect plugin (auth-signin equivalent)
 	AnnotationsAuthSigninURL = AnnotationsPrefix + "auth-signin"
 
+	// custom-error-page plugin
+	AnnotationsCustomErrorCodes = AnnotationsPrefix + "custom-error-codes"
+
 	// ip-restriction plugin
 	AnnotationsAllowlistSourceRange = AnnotationsPrefix + "allowlist-source-range"
 	AnnotationsBlocklistSourceRange = AnnotationsPrefix + "blocklist-source-range"

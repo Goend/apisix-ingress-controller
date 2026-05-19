@@ -131,6 +131,15 @@ type AuthRedirectConfig struct {
 	SigninURL string `json:"signin_url"`
 }
 
+// CustomErrorPageConfig is the rule config for custom-error-page plugin.
+// Intercepts specified HTTP error status codes and returns custom error pages.
+// Per-Ingress: specifies which codes to intercept (pages come from plugin metadata).
+// +k8s:deepcopy-gen=true
+type CustomErrorPageConfig struct {
+	Enable bool  `json:"enable"`
+	Codes  []int `json:"codes"`
+}
+
 // BasicAuthConfig is the rule config for basic-auth plugin.
 // +k8s:deepcopy-gen=true
 type BasicAuthConfig struct {

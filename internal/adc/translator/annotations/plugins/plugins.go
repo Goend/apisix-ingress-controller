@@ -47,6 +47,7 @@ var (
 		NewIPRestrictionHandler(),
 		NewForwardAuthHandler(),
 		NewAuthRedirectHandler(),
+		NewCustomErrorPageHandler(),
 	}
 )
 
