@@ -124,6 +124,13 @@ type ForwardAuthConfig struct {
 	ClientHeaders   []string `json:"client_headers,omitempty"`
 }
 
+// AuthRedirectConfig is the rule config for auth-redirect plugin.
+// Intercepts 401/403 responses and redirects to a signin URL.
+// +k8s:deepcopy-gen=true
+type AuthRedirectConfig struct {
+	SigninURL string `json:"signin_url"`
+}
+
 // BasicAuthConfig is the rule config for basic-auth plugin.
 // +k8s:deepcopy-gen=true
 type BasicAuthConfig struct {

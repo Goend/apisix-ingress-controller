@@ -223,8 +223,8 @@ build-push-image: docker-build
 
 .PHONY: build-multi-arch
 build-multi-arch:
-	@CGO_ENABLED=0 GOARCH=amd64 go build -o bin/apisix-ingress-controller_amd64 -ldflags $(GO_LDFLAGS) cmd/main.go
-	@CGO_ENABLED=0 GOARCH=arm64 go build -o bin/apisix-ingress-controller_arm64 -ldflags $(GO_LDFLAGS) cmd/main.go
+	@CGO_ENABLED=0 GOARCH=amd64 GOOS=linux go build -o bin/apisix-ingress-controller_amd64 -ldflags $(GO_LDFLAGS) cmd/main.go
+	@CGO_ENABLED=0 GOARCH=arm64 GOOS=linux go build -o bin/apisix-ingress-controller_arm64 -ldflags $(GO_LDFLAGS) cmd/main.go
 
 .PHONY: build-multi-arch-image
 build-multi-arch-image: build-multi-arch

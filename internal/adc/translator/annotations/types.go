@@ -75,6 +75,9 @@ const (
 	AnnotationsForwardAuthUpstreamHeaders = AnnotationsPrefix + "auth-upstream-headers"
 	AnnotationsForwardAuthClientHeaders   = AnnotationsPrefix + "auth-client-headers"
 
+	// auth-redirect plugin (auth-signin equivalent)
+	AnnotationsAuthSigninURL = AnnotationsPrefix + "auth-signin"
+
 	// ip-restriction plugin
 	AnnotationsAllowlistSourceRange = AnnotationsPrefix + "allowlist-source-range"
 	AnnotationsBlocklistSourceRange = AnnotationsPrefix + "blocklist-source-range"
