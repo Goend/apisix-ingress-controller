@@ -20,6 +20,7 @@ package controller
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
@@ -54,8 +55,16 @@ type GatewayProxyController struct {
 }
 
 func (r *GatewayProxyController) SetupWithManager(mrg ctrl.Manager) error {
-	if config.ControllerConfig.DisableGatewayAPI || !pkgutils.HasAPIResource(mrg, &gatewayv1.Gateway{}) {
+	if config.ControllerConfig.DisableGatewayAPI {
 		r.disableGatewayAPI = true
+	} else {
+		hasGateway, err := pkgutils.HasAPIResource(mrg, &gatewayv1.Gateway{})
+		if err != nil {
+			return fmt.Errorf("failed to check Gateway API availability for GatewayProxy controller: %w", err)
+		}
+		if !hasGateway {
+			r.disableGatewayAPI = true
+		}
 	}
 	builder := ctrl.NewControllerManagedBy(mrg).
 		For(&v1alpha1.GatewayProxy{}).

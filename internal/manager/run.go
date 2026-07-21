@@ -175,7 +175,11 @@ func Run(ctx context.Context, logger logr.Logger) error {
 	checkK8sVersion(mgr, setupLog)
 
 	readier := readiness.NewReadinessManager(mgr.GetClient(), logger)
-	registerReadiness(mgr, readier)
+	err = registerReadiness(mgr, readier)
+	if err != nil {
+		setupLog.Error(err, "unable to register readiness")
+		return err
+	}
 
 	if err := mgr.Add(readier); err != nil {
 		setupLog.Error(err, "unable to add readiness manager")
