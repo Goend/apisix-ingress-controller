@@ -63,7 +63,11 @@ func SetupAPIv1alpha1Indexer(mgr ctrl.Manager) error {
 		&v1alpha1.Consumer{}:             setupConsumerIndexer,
 		&v1alpha1.GatewayProxy{}:         setupGatewayProxyIndexer,
 	} {
-		if utils.HasAPIResource(mgr, resource) {
+		has, err := utils.HasAPIResource(mgr, resource)
+		if err != nil {
+			return err
+		}
+		if has {
 			if err := setup(mgr); err != nil {
 				return err
 			}
@@ -85,7 +89,11 @@ func SetupAPIv2Indexer(mgr ctrl.Manager) error {
 		&apiv2.ApisixTls{}:           setupApisixTlsIndexer,
 		&apiv2.ApisixGlobalRule{}:    setupApisixGlobalRuleIndexer,
 	} {
-		if utils.HasAPIResource(mgr, resource) {
+		has, err := utils.HasAPIResource(mgr, resource)
+		if err != nil {
+			return err
+		}
+		if has {
 			if err := setup(mgr); err != nil {
 				return err
 			}
@@ -108,7 +116,11 @@ func SetupGatewayAPIIndexer(mgr ctrl.Manager) error {
 		&gatewayv1alpha2.TLSRoute{}: setupTLSRouteIndexer,
 		&gatewayv1.GatewayClass{}:   setupGatewayClassIndexer,
 	} {
-		if utils.HasAPIResource(mgr, resource) {
+		has, err := utils.HasAPIResource(mgr, resource)
+		if err != nil {
+			return err
+		}
+		if has {
 			if err := setup(mgr); err != nil {
 				return err
 			}

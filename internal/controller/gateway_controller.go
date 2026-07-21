@@ -99,19 +99,31 @@ func (r *GatewayReconciler) SetupWithManager(mgr ctrl.Manager) error {
 			builder.WithPredicates(referenceGrantPredicates(KindGateway)),
 		)
 	}
-	if pkgutils.HasAPIResource(mgr, &gatewayv1alpha2.TCPRoute{}) {
+	hasTCP, err := pkgutils.HasAPIResource(mgr, &gatewayv1alpha2.TCPRoute{})
+	if err != nil {
+		return fmt.Errorf("failed to check TCPRoute API availability: %w", err)
+	}
+	if hasTCP {
 		bdr.Watches(
 			&gatewayv1alpha2.TCPRoute{},
 			handler.EnqueueRequestsFromMapFunc(r.listGatewaysForStatusParentRefs),
 		)
 	}
-	if pkgutils.HasAPIResource(mgr, &gatewayv1alpha2.TLSRoute{}) {
+	hasTLS, err := pkgutils.HasAPIResource(mgr, &gatewayv1alpha2.TLSRoute{})
+	if err != nil {
+		return fmt.Errorf("failed to check TLSRoute API availability: %w", err)
+	}
+	if hasTLS {
 		bdr.Watches(
 			&gatewayv1alpha2.TLSRoute{},
 			handler.EnqueueRequestsFromMapFunc(r.listGatewaysForStatusParentRefs),
 		)
 	}
-	if pkgutils.HasAPIResource(mgr, &gatewayv1alpha2.UDPRoute{}) {
+	hasUDP, err := pkgutils.HasAPIResource(mgr, &gatewayv1alpha2.UDPRoute{})
+	if err != nil {
+		return fmt.Errorf("failed to check UDPRoute API availability: %w", err)
+	}
+	if hasUDP {
 		bdr.Watches(
 			&gatewayv1alpha2.UDPRoute{},
 			handler.EnqueueRequestsFromMapFunc(r.listGatewaysForStatusParentRefs),
